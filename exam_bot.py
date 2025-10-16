@@ -23,24 +23,21 @@ def run():
 threading.Thread(target=run).start()
 # ===================================
 
-# شناسه ادمین (خودت)
 ADMIN_ID = 677533280
-
-# فایل ذخیره نتایج
 RESULTS_FILE = "results.csv"
+
 if not os.path.exists(RESULTS_FILE):
     with open(RESULTS_FILE, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["Name", "Student ID", "User ID", "Score", "Percent"])
 
-# نمونه سوالات آزمون
 QUESTIONS = [
     {"q": "پایتخت ایران کجاست؟", "options": ["مشهد", "تهران", "اصفهان", "تبریز"], "answer": 1},
     {"q": "عدد پی تقریباً چند است؟", "options": ["2.14", "3.14", "4.13", "2.71"], "answer": 1},
     {"q": "در کدام فصل بارش برف بیشتر است؟", "options": ["تابستان", "پاییز", "زمستان", "بهار"], "answer": 2},
     {"q": "نویسنده شاهنامه کیست؟", "options": ["سعدی", "مولوی", "فردوسی", "حافظ"], "answer": 2},
     {"q": "نخستین سیاره منظومه شمسی؟", "options": ["زهره", "عطارد", "مریخ", "زحل"], "answer": 1},
-] * 6  # مجموعاً ۳۰ سؤال
+] * 6
 
 user_data = {}
 EXAM_DURATION = 15 * 60  # ۱۵ دقیقه
@@ -97,6 +94,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "start_exam":
         await query.edit_message_text("✅ آزمون آغاز شد! موفق باشید 🌟")
+        # ✅ توقف کوتاه برای آماده شدن context
+        await asyncio.sleep(0.5)
         await start_exam(context, user_id)
         return
 
@@ -152,7 +151,6 @@ async def send_next_question(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     data = user_data[user_id]
     q = data["questions"][data["index"]]
 
-    # گزینه‌ها + پاسخ ندادن یا پایان آزمون
     buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
 
     if data["index"] == len(data["questions"]) - 1:
@@ -178,18 +176,15 @@ async def finish_exam_manual(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     name = data["name"]
     student_id = data["student_id"]
 
-    # ذخیره در فایل CSV
     with open(RESULTS_FILE, "a", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([name, student_id, user_id, data["score"], f"{percent:.1f}%"])
 
-    # پیام به کاربر
     await context.bot.send_message(
         chat_id=user_id,
         text=f"✅ آزمون پایان یافت!\n📊 نمره شما: {data['score']} از {total}\nدرصد پاسخ صحیح: {percent:.1f}%"
     )
 
-    # پیام به ادمین
     msg = (
         f"📋 نتیجه آزمون جدید:\n\n"
         f"👤 نام: {name}\n"
@@ -204,13 +199,14 @@ async def finish_exam_manual(context: ContextTypes.DEFAULT_TYPE, user_id: int):
         print("خطا در ارسال به ادمین:", e)
 
 # ====== اجرای ربات ======
-TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"  # ← توکن رباتت را اینجا قرار بده
+TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"
 
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.run_polling()
+
 
 
 
