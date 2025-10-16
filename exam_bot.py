@@ -1,3 +1,4 @@
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
@@ -9,7 +10,7 @@ import os
 from flask import Flask
 import threading
 
-# ====== وب‌سرور کوچک برای Render ======
+# ====== وب‌سرور برای Render ======
 flask_app = Flask("")
 
 @flask_app.route("/")
@@ -20,19 +21,19 @@ def run():
     flask_app.run(host="0.0.0.0", port=10000)
 
 threading.Thread(target=run).start()
-# ======================================
+# ===================================
 
-# شناسه ادمین
+# شناسه ادمین (تو باید این رو با آی‌دی خودت عوض کنی)
 ADMIN_ID = 677533280
 
-# فایل نتایج
+# فایل ذخیره نتایج
 RESULTS_FILE = "results.csv"
 if not os.path.exists(RESULTS_FILE):
-    with open(RESULTS_FILE, "w", newline='', encoding='utf-8') as f:
+    with open(RESULTS_FILE, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["Name", "Student ID", "User ID", "Score", "Percent"])
 
-# سوالات نمونه
+# سوالات آزمون
 QUESTIONS = [
     {"q": "پایتخت ایران کجاست؟", "options": ["مشهد", "تهران", "اصفهان", "تبریز"], "answer": 1},
     {"q": "عدد پی تقریباً چند است؟", "options": ["2.14", "3.14", "4.13", "2.71"], "answer": 1},
@@ -42,19 +43,19 @@ QUESTIONS = [
 ] * 6  # 30 سؤال
 
 user_data = {}
+EXAM_DURATION = 15 * 60  # 15 دقیقه
 
 # ====== شروع آزمون ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
     if user_id in user_data and user_data[user_id].get("completed"):
-        await update.message.reply_text("⚠️ شما قبلاً آزمون را انجام داده‌اید و مجاز به تکرار نیستید.")
+        await update.message.reply_text("⚠️ شما قبلاً در این آزمون شرکت کرده‌اید.")
         return
 
     user_data[user_id] = {"stage": "name"}
     await update.message.reply_text("👋 لطفاً نام و نام خانوادگی خود را وارد کنید:")
 
-# دریافت نام و شماره دانشجویی
+# ====== دریافت نام و شماره دانشجویی ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
@@ -68,14 +69,66 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if stage == "name":
         user_data[user_id]["name"] = text
         user_data[user_id]["stage"] = "student_id"
-        await update.message.reply_text("شماره دانشجویی خود را وارد کنید:")
+        await update.message.reply_text("📘 شماره دانشجویی خود را وارد کنید:")
+
     elif stage == "student_id":
         user_data[user_id]["student_id"] = text
-        user_data[user_id]["stage"] = "exam"
-        await update.message.reply_text("✅ اطلاعات ثبت شد.\nآزمون شروع می‌شود...")
-        await start_exam(update, context)
+        user_data[user_id]["stage"] = "rules"
+        await show_rules(update, context)
 
-# شروع آزمون
+# ====== نمایش مقررات آزمون ======
+async def show_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rules_text = (
+        "📜 **مقررات آزمون:**\n\n"
+        "1️⃣ آزمون دارای *نمره منفی* است (نیم نمره برای پاسخ اشتباه).\n"
+        "2️⃣ زمان پاسخ‌گویی *۱۵ دقیقه* است.\n"
+        "3️⃣ پس از گذشت ۱۵ دقیقه، آزمون به‌صورت خودکار به پایان می‌رسد.\n\n"
+        "در صورت آمادگی برای شروع، دکمه زیر را فشار دهید 👇"
+    )
+    button = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 شروع آزمون", callback_data="start_exam")]])
+    await update.message.reply_text(rules_text, parse_mode="Markdown", reply_markup=button)
+
+# ====== کلیک روی دکمه‌ها ======
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    data = user_data.get(user_id, {})
+    await query.answer()
+
+    if query.data == "start_exam":
+        await query.edit_message_text("✅ آزمون آغاز شد! موفق باشید 🌟")
+        await start_exam(query, context)
+        return
+
+    if "questions" not in data or data.get("completed"):
+        return
+
+    q = data["questions"][data["index"]]
+    answer = query.data
+
+    # اگر گزینه پنجم (پاسخ نمی‌دهم یا پایان آزمون) انتخاب شد
+    if answer == "skip":
+        pass  # بدون تغییر نمره
+    elif answer == "end_exam":
+        await query.edit_message_text("📤 آزمون به درخواست شما پایان یافت.")
+        await finish_exam_manual(context, user_id)
+        return
+    else:
+        answer = int(answer)
+        if answer == q["answer"]:
+            data["score"] += 1
+        else:
+            data["score"] -= 0.5  # نمره منفی
+
+    data["index"] += 1
+
+    # اگر همه سؤالات تمام شده باشد
+    if data["index"] >= len(data["questions"]):
+        await finish_exam_manual(context, user_id)
+    else:
+        await send_next_question(context, user_id)
+
+# ====== شروع آزمون ======
 async def start_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = user_data[user_id]
@@ -83,19 +136,33 @@ async def start_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data["index"] = 0
     data["score"] = 0
     data["completed"] = False
-    await send_question(update, context)
 
-# ارسال سؤال
-async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    # تایمر ۱۵ دقیقه
+    asyncio.create_task(exam_timer(context, user_id))
+
+    await send_next_question(context, user_id)
+
+# ====== تایمر پایان خودکار ======
+async def exam_timer(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    await asyncio.sleep(EXAM_DURATION)
+    data = user_data.get(user_id)
+    if data and not data.get("completed"):
+        await context.bot.send_message(chat_id=user_id, text="⏰ زمان آزمون به پایان رسید!")
+        await finish_exam_manual(context, user_id)
+
+# ====== ارسال سؤال ======
+async def send_next_question(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     data = user_data[user_id]
-
-    if data["index"] >= len(data["questions"]):
-        await finish_exam(update, context)
-        return
-
     q = data["questions"][data["index"]]
+
+    # دکمه‌های گزینه‌ها + پاسخ ندادن
     buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
+
+    # اگر سؤال آخر است → دکمه پایان آزمون
+    if data["index"] == len(data["questions"]) - 1:
+        buttons.append([InlineKeyboardButton("📤 پایان آزمون", callback_data="end_exam")])
+    else:
+        buttons.append([InlineKeyboardButton("⏭ پاسخ نمی‌دهم", callback_data="skip")])
 
     await context.bot.send_message(
         chat_id=user_id,
@@ -103,54 +170,27 @@ async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# پاسخ کاربر و نمایش فوری سؤال بعدی
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
+# ====== پایان آزمون ======
+async def finish_exam_manual(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     data = user_data[user_id]
-    q = data["questions"][data["index"]]
-    answer = int(query.data)
+    if data.get("completed"):
+        return
 
-    # نمره‌دهی
-    if answer == q["answer"]:
-        data["score"] += 1
-    else:
-        data["score"] -= 0.5  # نمره منفی
-
-    data["index"] += 1
-
-    if data["index"] < len(data["questions"]):
-        await query.edit_message_text("✅ پاسخ ثبت شد! سؤال بعد:")
-        # ارسال سؤال بعدی
-        next_q = data["questions"][data["index"]]
-        buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(next_q["options"])]
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=f"❓ سؤال {data['index'] + 1} از {len(data['questions'])}\n\n{next_q['q']}",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-    else:
-        await finish_exam(update, context)
-
-# پایان آزمون
-async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    data = user_data[user_id]
     data["completed"] = True
-
-    percent = max((data["score"] / len(data["questions"])) * 100, 0)
+    total = len(data["questions"])
+    percent = max((data["score"] / total) * 100, 0)
     name = data["name"]
     student_id = data["student_id"]
 
     # ذخیره در فایل CSV
-    with open(RESULTS_FILE, "a", newline='', encoding='utf-8') as f:
+    with open(RESULTS_FILE, "a", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([name, student_id, user_id, data["score"], f"{percent:.1f}%"])
 
     # پیام به کاربر
     await context.bot.send_message(
         chat_id=user_id,
-        text=f"✅ آزمون تمام شد!\n📊 نمره شما: {data['score']} از {len(data['questions'])}\nدرصد پاسخ صحیح: {percent:.1f}%"
+        text=f"✅ آزمون پایان یافت!\n📊 نمره شما: {data['score']} از {total}\nدرصد پاسخ صحیح: {percent:.1f}%"
     )
 
     # پیام به ادمین
@@ -159,7 +199,7 @@ async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 نام: {name}\n"
         f"🎓 شماره دانشجویی: {student_id}\n"
         f"🆔 کاربر: {user_id}\n"
-        f"📊 نمره: {data['score']} از {len(data['questions'])}\n"
+        f"📊 نمره: {data['score']} از {total}\n"
         f"درصد: {percent:.1f}%"
     )
     try:
@@ -167,15 +207,15 @@ async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("خطا در ارسال به ادمین:", e)
 
-# ======== توکن ربات خودت را اینجا قرار بده ========
+# ====== اجرای ربات ======
 TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"
 
-# اجرای ربات
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_handler))
-
 app.run_polling()
+
+
 
 
