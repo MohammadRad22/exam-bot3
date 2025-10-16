@@ -1,12 +1,15 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ContextTypes, filters
+)
 import random
 import csv
 import os
 from flask import Flask
 import threading
 
-# ===== وب سرور کوچک برای Render Web Service =====
+# ====== وب‌سرور کوچک برای Render ======
 flask_app = Flask("")
 
 @flask_app.route("/")
@@ -17,7 +20,10 @@ def run():
     flask_app.run(host="0.0.0.0", port=10000)
 
 threading.Thread(target=run).start()
-# ===============================================
+# ======================================
+
+# شناسه ادمین
+ADMIN_ID = 677533280
 
 # فایل نتایج
 RESULTS_FILE = "results.csv"
@@ -25,62 +31,85 @@ RESULTS_FILE = "results.csv"
 if not os.path.exists(RESULTS_FILE):
     with open(RESULTS_FILE, "w", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(["User ID", "Name", "Score", "Percent", "Answers"])
+        writer.writerow(["Name", "Student ID", "User ID", "Score", "Percent"])
 
-# سوالات آزمایشی (30 سوال)
+# سوالات (نمونه)
 QUESTIONS = [
     {"q": "پایتخت ایران کجاست؟", "options": ["مشهد", "تهران", "اصفهان", "تبریز"], "answer": 1},
     {"q": "عدد پی تقریباً چند است؟", "options": ["2.14", "3.14", "4.13", "2.71"], "answer": 1},
     {"q": "در کدام فصل بارش برف بیشتر است؟", "options": ["تابستان", "پاییز", "زمستان", "بهار"], "answer": 2},
     {"q": "نویسنده شاهنامه کیست؟", "options": ["سعدی", "مولوی", "فردوسی", "حافظ"], "answer": 2},
     {"q": "نخستین سیاره منظومه شمسی؟", "options": ["زهره", "عطارد", "مریخ", "زحل"], "answer": 1},
-    {"q": "حاصل ۵×۶ چیست؟", "options": ["۳۰", "۲۶", "۳۶", "۳۲"], "answer": 0},
-    {"q": "در کدام کشور برج ایفل قرار دارد؟", "options": ["فرانسه", "ایتالیا", "آلمان", "انگلستان"], "answer": 0},
-    {"q": "نویسنده گلستان؟", "options": ["سعدی", "حافظ", "فردوسی", "خیام"], "answer": 0},
-    {"q": "آب در چند درجه یخ می‌زند؟", "options": ["۰", "۱۰۰", "۵۰", "۲۵"], "answer": 0},
-    {"q": "بزرگ‌ترین قاره جهان؟", "options": ["اروپا", "آسیا", "آفریقا", "آمریکا"], "answer": 1},
-] * 3  # 30 سوال
+] * 6  # 30 سوال
 
-# اطلاعات کاربران
 user_data = {}
 
-# فرمان /start
+# شروع
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    name = update.effective_user.full_name
 
+    # اگر قبلاً آزمون داده
     if user_id in user_data and user_data[user_id].get("completed"):
         await update.message.reply_text("⚠️ شما قبلاً آزمون را انجام داده‌اید و مجاز به تکرار نیستید.")
         return
 
-    random_questions = random.sample(QUESTIONS, 30)
-    user_data[user_id] = {
-        "name": name,
-        "questions": random_questions,
-        "index": 0,
-        "score": 0,
-        "answers": [],
-        "completed": False
-    }
+    user_data[user_id] = {"stage": "name"}
+    await update.message.reply_text("👋 لطفاً نام و نام خانوادگی خود را وارد کنید:")
 
-    await send_question(update, context)
+# دریافت نام
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
 
-# ارسال سوال بعدی
-async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if user_id not in user_data:
+        await update.message.reply_text("برای شروع آزمون دستور /start را بزنید.")
+        return
+
+    stage = user_data[user_id].get("stage")
+
+    if stage == "name":
+        user_data[user_id]["name"] = text
+        user_data[user_id]["stage"] = "student_id"
+        await update.message.reply_text("شماره دانشجویی خود را وارد کنید:")
+    elif stage == "student_id":
+        user_data[user_id]["student_id"] = text
+        user_data[user_id]["stage"] = "exam"
+        await update.message.reply_text("✅ اطلاعات ثبت شد.\nآزمون شروع می‌شود...")
+        await start_exam(update, context)
+
+# شروع آزمون
+async def start_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = user_data[user_id]
 
-    if data["index"] < len(data["questions"]):
-        q = data["questions"][data["index"]]
-        buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
+    random_questions = random.sample(QUESTIONS, 30)
+    data["questions"] = random_questions
+    data["index"] = 0
+    data["score"] = 0
+    data["answers"] = []
+    data["completed"] = False
+
+    await send_question(update, context)
+
+# ارسال سؤال
+async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    data = user_data[user_id]
+    q = data["questions"][data["index"]]
+    buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
+
+    if update.message:
         await update.message.reply_text(
             f"سؤال {data['index'] + 1} از {len(data['questions'])}:\n\n{q['q']}",
             reply_markup=InlineKeyboardMarkup(buttons)
         )
     else:
-        await finish_exam(update, context)
+        await update.callback_query.edit_message_text(
+            f"سؤال {data['index'] + 1} از {len(data['questions'])}:\n\n{q['q']}",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
 
-# مدیریت پاسخ دکمه‌ها
+# هندل پاسخ‌ها
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -89,63 +118,59 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = data["questions"][data["index"]]
     answer = int(query.data)
 
-    correct = (answer == q["answer"])
-    data["answers"].append({
-        "question": q["q"],
-        "selected": q["options"][answer],
-        "correct_answer": q["options"][q["answer"]],
-        "is_correct": correct
-    })
-
-    if correct:
+    if answer == q["answer"]:
         data["score"] += 1
 
     data["index"] += 1
 
     if data["index"] < len(data["questions"]):
-        next_q = data["questions"][data["index"]]
-        buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(next_q["options"])]
-        await query.edit_message_text(
-            f"سؤال {data['index'] + 1} از {len(data['questions'])}:\n\n{next_q['q']}",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+        await send_question(update, context)
     else:
-        await finish_exam(query, context, from_query=True)
+        await finish_exam(update, context)
 
-# پایان آزمون و ذخیره نتایج
-async def finish_exam(update_or_query, context: ContextTypes.DEFAULT_TYPE, from_query=False):
-    user_id = update_or_query.from_user.id
+# پایان آزمون
+async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     data = user_data[user_id]
     data["completed"] = True
 
     percent = (data["score"] / len(data["questions"])) * 100
+    name = data["name"]
+    student_id = data["student_id"]
 
+    # ذخیره در فایل
     with open(RESULTS_FILE, "a", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow([user_id, data["name"], data["score"], f"{percent:.1f}%", str(data["answers"])])
+        writer.writerow([name, student_id, user_id, data["score"], f"{percent:.1f}%"])
 
-    text = f"✅ آزمون تمام شد!\n\n" \
-           f"📊 نمره شما: {data['score']} از {len(data['questions'])}\n" \
-           f"درصد پاسخ صحیح: {percent:.1f}%\n\n"
+    # پیام برای کاربر
+    await update.callback_query.edit_message_text(
+        f"✅ آزمون تمام شد!\n\n📊 نمره شما: {data['score']} از {len(data['questions'])}\nدرصد پاسخ صحیح: {percent:.1f}%"
+    )
 
-    for i, ans in enumerate(data["answers"], start=1):
-        mark = "✅" if ans["is_correct"] else "❌"
-        text += f"{i}. {ans['question']}\n" \
-                f"پاسخ شما: {ans['selected']}  {mark}\n" \
-                f"پاسخ صحیح: {ans['correct_answer']}\n\n"
+    # ارسال خلاصه به ادمین
+    msg = (
+        f"📋 نتیجه آزمون جدید:\n\n"
+        f"👤 نام: {name}\n"
+        f"🎓 شماره دانشجویی: {student_id}\n"
+        f"🆔 کاربر: {user_id}\n"
+        f"📊 نمره: {data['score']} از {len(data['questions'])}\n"
+        f"درصد: {percent:.1f}%"
+    )
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=msg)
+    except Exception as e:
+        print("خطا در ارسال به ادمین:", e)
 
-    if from_query:
-        await update_or_query.edit_message_text(text[:4000])
-    else:
-        await update_or_query.message.reply_text(text[:4000])
+# ======== جایگزین کن توکن ربات خودت ========
+TOKEN = "YOUR_BOT_TOKEN_HERE"
 
-# ======== جایگزین کن توکن خودت رو اینجا ========
-TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"
-
-# ساخت اپلیکیشن و اضافه کردن هندلرها
+# راه‌اندازی ربات
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_handler))
 
-# اجرا (Polling ربات)
 app.run_polling()
+
+
