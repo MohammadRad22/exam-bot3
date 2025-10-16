@@ -172,7 +172,7 @@ async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("خطا در ارسال به ادمین:", e)
 
 # ======== توکن ربات خود را اینجا قرار بده ========
-TOKEN = "YOUR_BOT_TOKEN_HERE"
+TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"
 
 # اجرای ربات
 app = ApplicationBuilder().token(TOKEN).build()
@@ -181,6 +181,7 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_handler))
 
 app.run_polling()
+
 
 
 
