@@ -6,7 +6,6 @@ from telegram.ext import (
 import random
 import csv
 import os
-import asyncio
 from flask import Flask
 import threading
 
@@ -23,14 +22,17 @@ def run():
 threading.Thread(target=run).start()
 # ======================================
 
+# شناسه ادمین
 ADMIN_ID = 677533280
-RESULTS_FILE = "results.csv"
 
+# فایل نتایج
+RESULTS_FILE = "results.csv"
 if not os.path.exists(RESULTS_FILE):
     with open(RESULTS_FILE, "w", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(["Name", "Student ID", "User ID", "Score", "Percent"])
 
+# سوالات (نمونه)
 QUESTIONS = [
     {"q": "پایتخت ایران کجاست؟", "options": ["مشهد", "تهران", "اصفهان", "تبریز"], "answer": 1},
     {"q": "عدد پی تقریباً چند است؟", "options": ["2.14", "3.14", "4.13", "2.71"], "answer": 1},
@@ -81,10 +83,9 @@ async def start_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data["index"] = 0
     data["score"] = 0
     data["completed"] = False
-    data["timer_task"] = None
     await send_question(update, context)
 
-# ارسال سؤال + تایمر
+# ارسال سؤال
 async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = user_data[user_id]
@@ -96,51 +97,10 @@ async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = data["questions"][data["index"]]
     buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
 
-    msg = await update.message.reply_text(
-        f"❓ سؤال {data['index'] + 1} از {len(data['questions'])}\n"
-        f"⏱️ زمان باقی‌مانده: 30 ثانیه\n\n{q['q']}",
+    await update.message.reply_text(
+        f"❓ سؤال {data['index'] + 1} از {len(data['questions'])}\n\n{q['q']}",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
-
-    # شروع تایمر برای این سؤال
-    data["timer_task"] = asyncio.create_task(timer_countdown(context, msg, user_id))
-
-# تایمر ۳۰ ثانیه‌ای
-async def timer_countdown(context, message, user_id):
-    try:
-        for t in range(25, 0, -5):  # هر ۵ ثانیه آپدیت
-            await asyncio.sleep(5)
-            try:
-                data = user_data[user_id]
-                if data["index"] >= len(data["questions"]):
-                    return
-                q = data["questions"][data["index"]]
-                buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
-                await context.bot.edit_message_text(
-                    chat_id=message.chat_id,
-                    message_id=message.message_id,
-                    text=f"❓ سؤال {data['index'] + 1}\n⏱️ {t} ثانیه مانده...\n\n{q['q']}",
-                    reply_markup=InlineKeyboardMarkup(buttons)
-                )
-            except:
-                pass
-        # اتمام زمان
-        await question_timeout(context, user_id)
-    except asyncio.CancelledError:
-        pass
-
-# وقتی زمان تمام می‌شود
-async def question_timeout(context, user_id):
-    data = user_data[user_id]
-    data["index"] += 1
-    await context.bot.send_message(chat_id=user_id, text="⏳ زمان شما برای این سؤال تمام شد.")
-    await send_next_question(context, user_id)
-
-# بعدی
-async def send_next_question(context, user_id):
-    class Dummy:
-        def __init__(self, uid): self.effective_user = type('x', (), {'id': uid}); self.message = type('y', (), {'reply_text': lambda *a, **kw: asyncio.create_task(context.bot.send_message(chat_id=uid, **kw))})()
-    await send_question(Dummy(user_id), context)
 
 # پاسخ کاربر
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -149,10 +109,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = user_data[user_id]
     q = data["questions"][data["index"]]
     answer = int(query.data)
-
-    # متوقف کردن تایمر فعلی
-    if data.get("timer_task"):
-        data["timer_task"].cancel()
 
     # نمره‌دهی
     if answer == q["answer"]:
@@ -164,9 +120,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data["index"] < len(data["questions"]):
         await query.edit_message_text("✅ پاسخ ثبت شد! سؤال بعد:")
+        # ارسال سؤال بعدی
         await send_next_question(context, user_id)
     else:
         await finish_exam(update, context)
+
+# ارسال سؤال بعدی
+async def send_next_question(context, user_id):
+    class Dummy:
+        def __init__(self, uid):
+            self.effective_user = type('x', (), {'id': uid})
+            self.message = type('y', (), {
+                'reply_text': lambda *a, **kw: asyncio.create_task(
+                    context.bot.send_message(chat_id=uid, **kw))
+            })()
+    await send_question(Dummy(user_id), context)
 
 # پایان آزمون
 async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -178,15 +146,18 @@ async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = data["name"]
     student_id = data["student_id"]
 
+    # ذخیره در فایل CSV
     with open(RESULTS_FILE, "a", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow([name, student_id, user_id, data["score"], f"{percent:.1f}%"])
 
+    # پیام به کاربر
     await context.bot.send_message(
         chat_id=user_id,
         text=f"✅ آزمون تمام شد!\n📊 نمره شما: {data['score']} از {len(data['questions'])}\nدرصد پاسخ صحیح: {percent:.1f}%"
     )
 
+    # پیام به ادمین
     msg = (
         f"📋 نتیجه آزمون جدید:\n\n"
         f"👤 نام: {name}\n"
@@ -200,8 +171,8 @@ async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("خطا در ارسال به ادمین:", e)
 
-# ======== توکن ربات خودت را جایگزین کن ========
-TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"
+# ======== توکن ربات خود را اینجا قرار بده ========
+TOKEN = "YOUR_BOT_TOKEN_HERE"
 
 # اجرای ربات
 app = ApplicationBuilder().token(TOKEN).build()
@@ -210,6 +181,8 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_handler))
 
 app.run_polling()
+
+
 
 
 
