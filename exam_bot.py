@@ -23,10 +23,7 @@ def run():
 threading.Thread(target=run).start()
 # ======================================
 
-# شناسه ادمین
 ADMIN_ID = 677533280
-
-# فایل نتایج
 RESULTS_FILE = "results.csv"
 
 if not os.path.exists(RESULTS_FILE):
@@ -34,7 +31,6 @@ if not os.path.exists(RESULTS_FILE):
         writer = csv.writer(f)
         writer.writerow(["Name", "Student ID", "User ID", "Score", "Percent"])
 
-# سوالات (نمونه)
 QUESTIONS = [
     {"q": "پایتخت ایران کجاست؟", "options": ["مشهد", "تهران", "اصفهان", "تبریز"], "answer": 1},
     {"q": "عدد پی تقریباً چند است؟", "options": ["2.14", "3.14", "4.13", "2.71"], "answer": 1},
@@ -101,36 +97,39 @@ async def send_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
 
     msg = await update.message.reply_text(
-        f"⏰ سؤال {data['index'] + 1} از {len(data['questions'])}\n"
-        f"شما 30 ثانیه زمان دارید!\n\n{q['q']}",
+        f"❓ سؤال {data['index'] + 1} از {len(data['questions'])}\n"
+        f"⏱️ زمان باقی‌مانده: 30 ثانیه\n\n{q['q']}",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-    # شروع تایمر ۳۰ ثانیه‌ای
+    # شروع تایمر برای این سؤال
     data["timer_task"] = asyncio.create_task(timer_countdown(context, msg, user_id))
 
-# تایمر شمارش معکوس
+# تایمر ۳۰ ثانیه‌ای
 async def timer_countdown(context, message, user_id):
     try:
-        for t in range(30, 0, -5):  # هر ۵ ثانیه به‌روزرسانی کن
+        for t in range(25, 0, -5):  # هر ۵ ثانیه آپدیت
             await asyncio.sleep(5)
             try:
+                data = user_data[user_id]
+                if data["index"] >= len(data["questions"]):
+                    return
+                q = data["questions"][data["index"]]
+                buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
                 await context.bot.edit_message_text(
                     chat_id=message.chat_id,
                     message_id=message.message_id,
-                    text=f"⏰ {t} ثانیه مانده...\n\n{user_data[user_id]['questions'][user_data[user_id]['index']]['q']}",
-                    reply_markup=InlineKeyboardMarkup(
-                        [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(user_data[user_id]['questions'][user_data[user_id]['index']]['options'])]
-                    )
+                    text=f"❓ سؤال {data['index'] + 1}\n⏱️ {t} ثانیه مانده...\n\n{q['q']}",
+                    reply_markup=InlineKeyboardMarkup(buttons)
                 )
             except:
                 pass
-        # وقتی زمان تمام شد
+        # اتمام زمان
         await question_timeout(context, user_id)
     except asyncio.CancelledError:
-        pass  # اگر کاربر قبل از اتمام تایمر پاسخ داد
+        pass
 
-# پایان زمان هر سؤال
+# وقتی زمان تمام می‌شود
 async def question_timeout(context, user_id):
     data = user_data[user_id]
     data["index"] += 1
@@ -155,14 +154,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.get("timer_task"):
         data["timer_task"].cancel()
 
+    # نمره‌دهی
     if answer == q["answer"]:
         data["score"] += 1
+    else:
+        data["score"] -= 0.5  # نمره منفی
 
     data["index"] += 1
 
     if data["index"] < len(data["questions"]):
+        await query.edit_message_text("✅ پاسخ ثبت شد! سؤال بعد:")
         await send_next_question(context, user_id)
-        await query.edit_message_text("✅ پاسخ ثبت شد! سؤال بعد...")
     else:
         await finish_exam(update, context)
 
@@ -172,7 +174,7 @@ async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = user_data[user_id]
     data["completed"] = True
 
-    percent = (data["score"] / len(data["questions"])) * 100
+    percent = max((data["score"] / len(data["questions"])) * 100, 0)
     name = data["name"]
     student_id = data["student_id"]
 
@@ -185,7 +187,6 @@ async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=f"✅ آزمون تمام شد!\n📊 نمره شما: {data['score']} از {len(data['questions'])}\nدرصد پاسخ صحیح: {percent:.1f}%"
     )
 
-    # ارسال خلاصه به ادمین
     msg = (
         f"📋 نتیجه آزمون جدید:\n\n"
         f"👤 نام: {name}\n"
@@ -199,16 +200,18 @@ async def finish_exam(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("خطا در ارسال به ادمین:", e)
 
-# ======== توکن خود را اینجا وارد کن ========
+# ======== توکن ربات خودت را جایگزین کن ========
 TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"
 
-# راه‌اندازی ربات
+# اجرای ربات
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_handler))
 
 app.run_polling()
+
+
 
 
 
