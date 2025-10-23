@@ -7,30 +7,37 @@ from telegram.ext import (
 import random
 import csv
 import os
-from flask import Flask
-import threading
+from flask import Flask, request
 
-# ====== وب‌سرور برای Render ======
-flask_app = Flask("")
+# ====== تنظیمات ======
+TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"  # 🔸 توکن ربات
+ADMIN_ID = 677533280
+RESULTS_FILE = "results.csv"
+WEBHOOK_URL = "https://exam-bot3.onrender.com"  # 🔸 آدرس Render
+
+EXAM_DURATION = 15 * 60  # ۱۵ دقیقه
+
+# ====== Flask برای دریافت Webhook ======
+flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def home():
-    return "Bot is running"
+    return "✅ Telegram Bot is running!"
 
-def run():
-    flask_app.run(host="0.0.0.0", port=10000)
+@flask_app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), app.bot)
+    # ارسال به async loop
+    asyncio.get_event_loop().create_task(app.process_update(update))
+    return "OK", 200
 
-threading.Thread(target=run).start()
-# ===================================
-
-ADMIN_ID = 677533280
-RESULTS_FILE = "results.csv"
-
+# ====== فایل نتایج ======
 if not os.path.exists(RESULTS_FILE):
     with open(RESULTS_FILE, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["Name", "Student ID", "User ID", "Score", "Percent"])
 
+# ====== سوالات ======
 QUESTIONS = [
     {"q": "پایتخت ایران کجاست؟", "options": ["مشهد", "تهران", "اصفهان", "تبریز"], "answer": 1},
     {"q": "عدد پی تقریباً چند است؟", "options": ["2.14", "3.14", "4.13", "2.71"], "answer": 1},
@@ -40,52 +47,46 @@ QUESTIONS = [
 ] * 6
 
 user_data = {}
-EXAM_DURATION = 15 * 60  # ۱۵ دقیقه
 
-# ====== شروع ربات ======
+# ====== فرمان /start ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in user_data and user_data[user_id].get("completed"):
         await update.message.reply_text("⚠️ شما قبلاً در این آزمون شرکت کرده‌اید.")
         return
-
     user_data[user_id] = {"stage": "name"}
     await update.message.reply_text("👋 لطفاً نام و نام خانوادگی خود را وارد کنید:")
 
-# ====== دریافت نام و شماره دانشجویی ======
+# ====== دریافت پیام ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
-
     if user_id not in user_data:
         await update.message.reply_text("برای شروع آزمون دستور /start را بزنید.")
         return
-
     stage = user_data[user_id].get("stage")
-
     if stage == "name":
         user_data[user_id]["name"] = text
         user_data[user_id]["stage"] = "student_id"
         await update.message.reply_text("📘 شماره دانشجویی خود را وارد کنید:")
-
     elif stage == "student_id":
         user_data[user_id]["student_id"] = text
         user_data[user_id]["stage"] = "rules"
         await show_rules(update, context)
 
-# ====== نمایش مقررات آزمون ======
+# ====== نمایش قوانین ======
 async def show_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rules_text = (
         "📜 **مقررات آزمون:**\n\n"
-        "1️⃣ آزمون دارای *نمره منفی* است (نیم نمره برای پاسخ اشتباه).\n"
+        "1️⃣ آزمون دارای *نمره منفی* است.\n"
         "2️⃣ زمان پاسخ‌گویی *۱۵ دقیقه* است.\n"
-        "3️⃣ پس از گذشت ۱۵ دقیقه، آزمون به‌صورت خودکار به پایان می‌رسد.\n\n"
-        "در صورت آمادگی برای شروع، دکمه زیر را فشار دهید 👇"
+        "3️⃣ پس از گذشت ۱۵ دقیقه، آزمون به‌صورت خودکار پایان می‌یابد.\n\n"
+        "در صورت آمادگی برای شروع، دکمه زیر را بزنید 👇"
     )
     button = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 شروع آزمون", callback_data="start_exam")]])
     await update.message.reply_text(rules_text, parse_mode="Markdown", reply_markup=button)
 
-# ====== مدیریت کلیک دکمه‌ها ======
+# ====== دکمه‌ها ======
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -94,7 +95,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "start_exam":
         await query.edit_message_text("✅ آزمون آغاز شد! موفق باشید 🌟")
-        # ✅ توقف کوتاه برای آماده شدن context
         await asyncio.sleep(0.5)
         await start_exam(context, user_id)
         return
@@ -108,7 +108,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if answer == "skip":
         pass
     elif answer == "end_exam":
-        await query.edit_message_text("📤 آزمون به درخواست شما پایان یافت.")
+        await query.edit_message_text("📤 آزمون پایان یافت.")
         await finish_exam_manual(context, user_id)
         return
     else:
@@ -116,7 +116,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if answer == q["answer"]:
             data["score"] += 1
         else:
-            data["score"] -= 0.5  # نمره منفی
+            data["score"] -= 0.5
 
     data["index"] += 1
 
@@ -132,13 +132,10 @@ async def start_exam(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     data["index"] = 0
     data["score"] = 0
     data["completed"] = False
-
-    # تایمر ۱۵ دقیقه‌ای
     asyncio.create_task(exam_timer(context, user_id))
-
     await send_next_question(context, user_id)
 
-# ====== تایمر برای پایان خودکار ======
+# ====== تایمر ======
 async def exam_timer(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     await asyncio.sleep(EXAM_DURATION)
     data = user_data.get(user_id)
@@ -150,14 +147,11 @@ async def exam_timer(context: ContextTypes.DEFAULT_TYPE, user_id: int):
 async def send_next_question(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     data = user_data[user_id]
     q = data["questions"][data["index"]]
-
     buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
-
     if data["index"] == len(data["questions"]) - 1:
         buttons.append([InlineKeyboardButton("📤 پایان آزمون", callback_data="end_exam")])
     else:
-        buttons.append([InlineKeyboardButton("⏭ پاسخ نمی‌دهم", callback_data="skip")])
-
+        buttons.append([InlineKeyboardButton("⏭ رد کردن", callback_data="skip")])
     await context.bot.send_message(
         chat_id=user_id,
         text=f"❓ سؤال {data['index'] + 1} از {len(data['questions'])}\n\n{q['q']}",
@@ -169,7 +163,6 @@ async def finish_exam_manual(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     data = user_data[user_id]
     if data.get("completed"):
         return
-
     data["completed"] = True
     total = len(data["questions"])
     percent = max((data["score"] / total) * 100, 0)
@@ -182,11 +175,11 @@ async def finish_exam_manual(context: ContextTypes.DEFAULT_TYPE, user_id: int):
 
     await context.bot.send_message(
         chat_id=user_id,
-        text=f"✅ آزمون پایان یافت!\n📊 نمره شما: {data['score']} از {total}\nدرصد پاسخ صحیح: {percent:.1f}%"
+        text=f"✅ آزمون پایان یافت!\n📊 نمره: {data['score']} از {total}\nدرصد: {percent:.1f}%"
     )
 
     msg = (
-        f"📋 نتیجه آزمون جدید:\n\n"
+        f"📋 نتیجه آزمون:\n\n"
         f"👤 نام: {name}\n"
         f"🎓 شماره دانشجویی: {student_id}\n"
         f"🆔 کاربر: {user_id}\n"
@@ -198,34 +191,23 @@ async def finish_exam_manual(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     except Exception as e:
         print("خطا در ارسال به ادمین:", e)
 
-# ====== اجرای ربات ======
-TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"
-
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-app.add_handler(CallbackQueryHandler(button_handler))
-from telegram.ext import ApplicationBuilder
-
-WEBHOOK_URL = "https://exam-bot3.onrender.com"  # آدرس سایت خودت
-
+# ====== اپلیکیشن تلگرام ======
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_handler))
 
-async def main():
+# ====== ست کردن Webhook ======
+async def set_webhook():
     await app.bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
-    await app.start()
-    await app.updater.start_webhook(
-        listen="0.0.0.0",
-        port=10000,
-        url_path=TOKEN,
-        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
-    )
-    await app.updater.idle()
+    print("✅ Webhook set successfully!")
 
-asyncio.run(main())
+# ====== اجرای Flask ======
+if __name__ == "__main__":
+    asyncio.run(set_webhook())
+    flask_app.run(host="0.0.0.0", port=10000)
+
+
 
 
 
