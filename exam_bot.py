@@ -10,14 +10,13 @@ import os
 from flask import Flask, request
 
 # ====== تنظیمات ======
-TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"  # 🔸 توکن ربات
+TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"  # 🔸 توکن واقعی رباتت را جایگزین کن
 ADMIN_ID = 677533280
 RESULTS_FILE = "results.csv"
 WEBHOOK_URL = "https://exam-bot3.onrender.com"  # 🔸 آدرس Render
-
 EXAM_DURATION = 15 * 60  # ۱۵ دقیقه
 
-# ====== Flask برای دریافت Webhook ======
+# ====== Flask برای Webhook ======
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -27,7 +26,6 @@ def home():
 @flask_app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), app.bot)
-    # ارسال به async loop
     asyncio.get_event_loop().create_task(app.process_update(update))
     return "OK", 200
 
@@ -74,7 +72,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data[user_id]["stage"] = "rules"
         await show_rules(update, context)
 
-# ====== نمایش قوانین ======
+# ====== قوانین ======
 async def show_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rules_text = (
         "📜 **مقررات آزمون:**\n\n"
@@ -147,7 +145,7 @@ async def exam_timer(context: ContextTypes.DEFAULT_TYPE, user_id: int):
 async def send_next_question(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     data = user_data[user_id]
     q = data["questions"][data["index"]]
-    buttons = [[InlineKeyboardButton(opt, callback_data=str(i))] for i, opt in enumerate(q["options"])]
+    buttons = [[InlineKeyboardButton(opt, callback_data=str(i)) for i, opt in enumerate(q["options"])]]
     if data["index"] == len(data["questions"]) - 1:
         buttons.append([InlineKeyboardButton("📤 پایان آزمون", callback_data="end_exam")])
     else:
@@ -202,10 +200,14 @@ async def set_webhook():
     await app.bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
     print("✅ Webhook set successfully!")
 
-# ====== اجرای Flask ======
+# ====== اجرای Flask با Uvicorn ======
 if __name__ == "__main__":
+    # ست کردن Webhook قبل از اجرای سرور
     asyncio.run(set_webhook())
-    flask_app.run(host="0.0.0.0", port=10000)
+    import uvicorn
+    uvicorn.run("app:flask_app", host="0.0.0.0", port=10000)
+
+
 
 
 
