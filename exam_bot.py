@@ -13,7 +13,7 @@ from flask import Flask, request
 TOKEN = "8475437543:AAG75xruJgLyAJnyD7WGsZlpsZu3dWs_ejE"  # 🔸 توکن واقعی رباتت را جایگزین کن
 ADMIN_ID = 677533280
 RESULTS_FILE = "results.csv"
-WEBHOOK_URL = "https://exam-bot3.onrender.com"  # 🔸 آدرس Render
+WEBHOOK_URL = "https://exam-bot3-1.onrender.com"  # 🔸 آدرس Render
 EXAM_DURATION = 15 * 60  # ۱۵ دقیقه
 
 # ====== Flask برای Webhook ======
@@ -206,6 +206,7 @@ if __name__ == "__main__":
     asyncio.run(set_webhook())
     import uvicorn
     uvicorn.run("app:flask_app", host="0.0.0.0", port=10000)
+
 
 
 
