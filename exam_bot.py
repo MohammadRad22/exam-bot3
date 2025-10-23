@@ -205,7 +205,28 @@ app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_handler))
-app.run_polling()
+from telegram.ext import ApplicationBuilder
+
+WEBHOOK_URL = "https://your-render-url.onrender.com"  # آدرس سایت خودت
+
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(CallbackQueryHandler(button_handler))
+
+async def main():
+    await app.bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
+    await app.start()
+    await app.updater.start_webhook(
+        listen="0.0.0.0",
+        port=10000,
+        url_path=TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/{TOKEN}"
+    )
+    await app.updater.idle()
+
+asyncio.run(main())
+
 
 
 
